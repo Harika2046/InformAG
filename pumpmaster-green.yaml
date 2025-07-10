@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pumpmaster-green
+  labels:
+    app: pumpmaster-green
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: pumpmaster-green
+  template:
+    metadata:
+      labels:
+        app: pumpmaster-green
+    spec:
+      containers:
+      - name: pumpmaster-api
+        image: informagregistry.azurecr.io/pumpmaster-api:latest
+        ports:
+        - containerPort: 80
