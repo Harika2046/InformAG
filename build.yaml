@@ -49,7 +49,7 @@ stages:
 
     - script: |
         echo "Health check against green deployment"
-        # Add curl or test script here
+        # Test script is added here
       displayName: 'Smoke Test Green Deployment'
 
 - stage: SwapTraffic
@@ -62,20 +62,6 @@ stages:
       vmImage: 'ubuntu-latest'
     steps:
     - script: |
-        echo "➡️ Swapping traffic by updating the Kubernetes service selector"
+        echo "Swapping traffic by updating the Kubernetes service selector"
         kubectl set selector svc/pumpmaster-service app=pumpmaster-green -n $(kubernetesNamespace)
       displayName: 'Swap Kubernetes Service to Green'
-
-- stage: CleanupBlue
-  displayName: 'Optional: Cleanup Old Blue Deployment'
-  dependsOn: SwapTraffic
-  condition: succeeded()
-  jobs:
-  - job: Cleanup
-    pool:
-      vmImage: 'ubuntu-latest'
-    steps:
-    - script: |
-        echo "🧹 Cleanup old blue deployment if needed"
-        # kubectl delete deployment pumpmaster-blue -n $(kubernetesNamespace)
-      displayName: 'Cleanup Blue Deployment'

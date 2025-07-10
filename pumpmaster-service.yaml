@@ -4,7 +4,7 @@ metadata:
   name: pumpmaster-service
 spec:
   selector:
-    app: pumpmaster-blue
+    app: pumpmaster-blue # I used blue as default.
   ports:
   - protocol: TCP
     port: 80
