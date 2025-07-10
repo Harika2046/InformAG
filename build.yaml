@@ -1,0 +1,81 @@
+trigger:
+  branches:
+    include:
+      - main
+
+variables:
+  imageName: 'pumpmaster-api'
+  acrName: 'informagregistry.azurecr.io'
+  kubernetesNamespace: 'pumpmaster'
+  containerRegistryServiceConnection: 'ACR-Service-Connection'
+  kubernetesServiceConnection: 'AKS-Service-Connection'
+
+stages:
+- stage: BuildAndPush
+  displayName: 'Build and Push Docker Image'
+  jobs:
+  - job: Build
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - checkout: self
+
+    - task: Docker@2
+      displayName: 'Build and Push Docker Image to ACR'
+      inputs:
+        containerRegistry: $(containerRegistryServiceConnection)
+        repository: $(imageName)
+        command: 'buildAndPush'
+        Dockerfile: '**/Dockerfile'
+        tags: |
+          $(Build.BuildId)
+
+- stage: DeployToGreen
+  displayName: 'Deploy to Green Deployment'
+  dependsOn: BuildAndPush
+  jobs:
+  - job: Deploy
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: Kubernetes@1
+      displayName: 'Set Image on Green Deployment'
+      inputs:
+        connectionType: 'Kubernetes Service Connection'
+        kubernetesServiceEndpoint: $(kubernetesServiceConnection)
+        namespace: $(kubernetesNamespace)
+        command: 'set'
+        arguments: 'image deployment/pumpmaster-green pumpmaster-api=$(acrName)/$(imageName):$(Build.BuildId)'
+
+    - script: |
+        echo "Health check against green deployment"
+        # Add curl or test script here
+      displayName: 'Smoke Test Green Deployment'
+
+- stage: SwapTraffic
+  displayName: 'Swap Traffic from Blue to Green'
+  dependsOn: DeployToGreen
+  condition: succeeded()
+  jobs:
+  - job: Swap
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - script: |
+        echo "➡️ Swapping traffic by updating the Kubernetes service selector"
+        kubectl set selector svc/pumpmaster-service app=pumpmaster-green -n $(kubernetesNamespace)
+      displayName: 'Swap Kubernetes Service to Green'
+
+- stage: CleanupBlue
+  displayName: 'Optional: Cleanup Old Blue Deployment'
+  dependsOn: SwapTraffic
+  condition: succeeded()
+  jobs:
+  - job: Cleanup
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - script: |
+        echo "🧹 Cleanup old blue deployment if needed"
+        # kubectl delete deployment pumpmaster-blue -n $(kubernetesNamespace)
+      displayName: 'Cleanup Blue Deployment'
