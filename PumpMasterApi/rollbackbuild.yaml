@@ -1,0 +1,95 @@
+trigger:
+  branches:
+    include:
+      - main
+
+variables:
+  imageName: 'pumpmaster-api'
+  acrName: 'informagregistry.azurecr.io'
+  kubernetesNamespace: 'pumpmaster'
+  containerRegistryServiceConnection: 'ACR-Service-Connection'
+  kubernetesServiceConnection: 'AKS-Service-Connection'
+
+stages:
+- stage: BuildAndPush
+  displayName: 'Build and Push Docker Image'
+  jobs:
+  - job: Build
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - checkout: self
+
+    - task: Docker@2
+      displayName: 'Build and Push Docker Image to ACR'
+      inputs:
+        containerRegistry: $(containerRegistryServiceConnection)
+        repository: $(imageName)
+        command: 'buildAndPush'
+        Dockerfile: '**/Dockerfile'
+        tags: |
+          $(Build.BuildId)
+
+- stage: DeployToGreen
+  displayName: 'Deploy to Green Deployment'
+  dependsOn: BuildAndPush
+  jobs:
+  - job: Deploy
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: Kubernetes@1
+      displayName: 'Set Image on Green Deployment'
+      inputs:
+        connectionType: 'Kubernetes Service Connection'
+        kubernetesServiceEndpoint: $(kubernetesServiceConnection)
+        namespace: $(kubernetesNamespace)
+        command: 'set'
+        arguments: 'image deployment/pumpmaster-green pumpmaster-api=$(acrName)/$(imageName):$(Build.BuildId)'
+
+    - script: |
+        echo "Performing health check against green deployment"
+        # Replace with your actual smoke test logic
+      displayName: 'Smoke Test Green Deployment'
+
+- stage: ManualApproval
+  displayName: 'Manual Approval Before Swap'
+  dependsOn: DeployToGreen
+  jobs:
+  - job: WaitForApproval
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: ManualValidation@0
+      inputs:
+        instructions: 'Approve swap from blue to green?'
+        onTimeout: 'reject'
+        timeout: '1h'
+
+- stage: SwapTraffic
+  displayName: 'Swap Traffic from Blue to Green'
+  dependsOn: ManualApproval
+  condition: succeeded()
+  jobs:
+  - job: Swap
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - script: |
+        echo "Swapping traffic to green deployment"
+        kubectl set selector svc/pumpmaster-service app=pumpmaster-green -n $(kubernetesNamespace)
+      displayName: 'Swap Kubernetes Service to Green'
+
+- stage: RollbackToBlue
+  displayName: 'Rollback to Blue Deployment'
+  dependsOn: SwapTraffic
+  condition: failed()   # Rollback only if SwapTraffic fails
+  jobs:
+  - job: Rollback
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - script: |
+        echo "Rolling back to blue deployment due to failed traffic swap"
+        kubectl set selector svc/pumpmaster-service app=pumpmaster-blue -n $(kubernetesNamespace)
+      displayName: 'Revert Kubernetes Service to Blue'
